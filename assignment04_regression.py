@@ -122,10 +122,9 @@ def estimate_regression(df: pd.DataFrame, x_var: str):
     statsmodels.regression.linear_model.RegressionResultsWrapper
         Fitted regression model.
     """
-    # TODO: Use statsmodels.formula.api.ols to estimate ret ~ x_var
-    # Hint: model = ols(f"ret ~ {x_var}", data=df).fit()
-    # return model
-    raise NotImplementedError("Implement the regression estimation here")
+    # estimate using the formula API from statsmodels
+    model = ols(f"ret ~ {x_var}", data=df).fit()
+    return model
 
 
 def save_regression_summary(model, output_path: Path) -> None:
@@ -133,9 +132,9 @@ def save_regression_summary(model, output_path: Path) -> None:
     Save the regression summary to a text file.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    # TODO: Write str(model.summary()) to the output file
-    with open(output_path, "w") as f:
-        pass  # TODO
+    # Write statsmodels summary text to the output file
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(str(model.summary()))
 
 
 def plot_scatter_with_regression(
@@ -151,14 +150,49 @@ def plot_scatter_with_regression(
     - Zoom axis limits to central data (e.g., 2nd–98th percentiles) so the slope is easier to see
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    # TODO: Create fig, ax with plt.subplots(figsize=(10, 6))
-    # TODO: Filter to rows with valid x_var and ret
-    # TODO: Scatter plot
-    # TODO: Overlay regression line (use model.params['Intercept'] and model.params[x_var])
-    # TODO: Set axis limits to zoom on central data (e.g., percentiles 2–98)
-    # TODO: Add title (include R²), xlabel, ylabel="Annual Return", legend
-    # TODO: Save with plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    pass  # TODO
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # prepare data (drop rows with missing x or ret)
+    plot_df = df[[x_var, "ret"]].dropna()
+    if plot_df.empty:
+        ax.text(0.5, 0.5, "No data available", ha="center", va="center")
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        return
+
+    x = plot_df[x_var].to_numpy()
+    y = plot_df["ret"].to_numpy()
+
+    # scatter
+    ax.scatter(x, y, alpha=0.6, label="Observations", edgecolors="none")
+
+    # fitted line using model parameters
+    intercept = float(model.params.get("Intercept", 0.0))
+    slope = float(model.params.get(x_var, 0.0))
+
+    x_min, x_max = np.percentile(x, [2, 98])
+    if x_min == x_max:
+        x_line = np.array([x_min, x_max])
+    else:
+        x_line = np.linspace(x_min, x_max, 100)
+    y_line = intercept + slope * x_line
+    ax.plot(x_line, y_line, color="red", lw=2, label="Fitted line")
+
+    # zoom to central data and add small margin for y-axis
+    y_min, y_max = np.percentile(y, [2, 98])
+    y_margin = (y_max - y_min) * 0.1 if (y_max - y_min) != 0 else 0.1
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min - y_margin, y_max + y_margin)
+
+    r2 = getattr(model, "rsquared", float("nan"))
+    ax.set_title(f"{title} (R²={r2:.3f})")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Annual Return")
+    ax.legend()
+    ax.grid(True)
+
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
 
 
 def print_key_results(model, x_var: str) -> None:
@@ -168,9 +202,34 @@ def print_key_results(model, x_var: str) -> None:
     print("\n" + "=" * 60)
     print(f"ret (annual) ~ {x_var.upper()}")
     print("=" * 60)
-    # TODO: Print intercept (β₀), slope (β₁), standard errors, t-stats, p-values
-    # TODO: Print R², Adj R², N
-    # TODO: Print whether slope is positive/negative and significant at 5%
+
+    params = model.params
+    bse = getattr(model, "bse", {})
+    tvalues = getattr(model, "tvalues", {})
+    pvalues = getattr(model, "pvalues", {})
+
+    intercept = params.get("Intercept", float("nan"))
+    slope = params.get(x_var, float("nan"))
+    se_intercept = bse.get("Intercept", float("nan"))
+    se_slope = bse.get(x_var, float("nan"))
+    t_intercept = tvalues.get("Intercept", float("nan"))
+    t_slope = tvalues.get(x_var, float("nan"))
+    p_intercept = pvalues.get("Intercept", float("nan"))
+    p_slope = pvalues.get(x_var, float("nan"))
+
+    r2 = getattr(model, "rsquared", float("nan"))
+    r2_adj = getattr(model, "rsquared_adj", float("nan"))
+    nobs = int(getattr(model, "nobs", 0))
+
+    print(f"Intercept (β₀): {intercept:.4f}    se={se_intercept:.4f}    t={t_intercept:.2f}    p={p_intercept:.3g}")
+    print(f"Slope (β₁) on {x_var}: {slope:.4f}    se={se_slope:.4f}    t={t_slope:.2f}    p={p_slope:.3g}")
+    print(f"R-squared: {r2:.4f}    Adj R-squared: {r2_adj:.4f}    N={nobs}")
+
+    if not np.isnan(slope) and not np.isnan(p_slope):
+        direction = "positive" if slope > 0 else ("negative" if slope < 0 else "zero")
+        significance = "significant" if p_slope < 0.05 else "not significant"
+        print(f"Slope is {direction} and {significance} at the 5% level.")
+
     print("=" * 60 + "\n")
 
 
